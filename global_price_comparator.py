@@ -458,11 +458,22 @@ def send_discord_report(new_scan):
         return
 
     grouped = {}
+    ps5_alerts = []
+
     for r in new_scan:
         g = r["group"]
         if g not in grouped:
             grouped[g] = []
         grouped[g].append(r)
+
+        # Vérification alerte Manette PS5 < 50€ (peu importe le vendeur)
+        p_num = r.get("price_numeric")
+        title_lower = r.get("title", "").lower()
+        group_lower = g.lower()
+        is_ps5_controller = "dualsense" in group_lower or "manette" in group_lower or "dualsense" in title_lower
+
+        if is_ps5_controller and p_num is not None and p_num < 50.0 and r.get("status") in ["En stock", "Précommande"]:
+            ps5_alerts.append(f"• **[{r['merchant']}]** [{r['title']}]({r['url']}) : **{r['price']}** ({r['status']})")
 
     embeds = []
     now_str = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
@@ -499,10 +510,14 @@ def send_discord_report(new_scan):
 
     for i in range(0, len(embeds), 10):
         chunk = embeds[i:i+10]
-        # Payload propre sans override d'avatar_url / username pour conserver l'image et nom par défaut configurés sur le Webhook Discord
         payload = {
             "embeds": chunk
         }
+
+        if ps5_alerts and i == 0:
+            alerts_text = "\n".join(ps5_alerts)
+            payload["content"] = f"🚨 <@825674203029962753> **ALERTE PRIX : Manette PS5 disponible sous les 50 € !**\n{alerts_text}"
+
         try:
             resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
             if resp.status_code in [200, 204]:
