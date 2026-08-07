@@ -478,6 +478,16 @@ def send_discord_report(new_scan):
     embeds = []
     now_str = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
 
+    # Embed d'en-tête de statut du Bot
+    embeds.append({
+        "title": "🟢 BOT ACTIF & FONCTIONNEL",
+        "description": f"✅ **Le bot de suivi des prix est en ligne et fonctionnel !**\n📊 **{len(new_scan)}** offres analysées lors de ce relevé.",
+        "color": 5763719, # Vert néon Discord
+        "footer": {
+            "text": f"Relevé automatique du {now_str}"
+        }
+    })
+
     for g_name, items in grouped.items():
         description_lines = []
         for item in sorted(items, key=lambda x: (x['merchant'], x['title'])):
