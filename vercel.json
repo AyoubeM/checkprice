@@ -1,12 +1,19 @@
 {
-  "functions": {
-    "api/cron.py": {
-      "maxDuration": 10
+  "builds": [
+    {
+      "src": "api/cron.py",
+      "use": "@vercel/python"
     }
-  },
+  ],
+  "rewrites": [
+    {
+      "source": "/api/cron",
+      "destination": "/api/cron.py"
+    }
+  ],
   "crons": [
     {
-      "path": "/api/cron",
+      "path": "/api/cron.py",
       "schedule": "0 12 * * *"
     }
   ]
