@@ -5,15 +5,9 @@
       "use": "@vercel/python"
     }
   ],
-  "rewrites": [
-    {
-      "source": "/api/cron",
-      "destination": "/api/cron.py"
-    }
-  ],
   "crons": [
     {
-      "path": "/api/cron.py",
+      "path": "/api/cron",
       "schedule": "0 12 * * *"
     }
   ]
