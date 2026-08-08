@@ -36,6 +36,12 @@ HEADERS = {
     'Upgrade-Insecure-Requests': '1'
 }
 
+AMAZON_COOKIES = {
+    'lc-acbfr': 'fr_FR',
+    'i18n-prefs': 'EUR',
+    'sp-cdn': '"L5Z9"'
+}
+
 FALLBACK_AMAZON_DUALSENSE = {
     "B08H99BPJN": "Bicolore (Blanc/Noir)",
     "B094WLFGD3": "Midnight Black",
@@ -91,8 +97,6 @@ def extract_amazon_page_info(html):
             price = el.get_text(strip=True)
             break
 
-    # Pas de fallback regex hors du ppd pour éviter les faux prix d'accessoires sponsorisés
-
     ppd_text = ppd.get_text().lower()
     is_preorder = "précommandez" in ppd_text or "paraîtra le" in ppd_text or "pre-order" in ppd_text
     is_unavailable = "actuellement indisponible" in avail_text or "non disponible" in avail_text
@@ -124,9 +128,9 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
     
     try:
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", timeout=10)
+            resp = cffi_requests.get(url, impersonate="chrome124", cookies=AMAZON_COOKIES, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, timeout=8)
+            resp = requests.get(url, headers=HEADERS, cookies=AMAZON_COOKIES, timeout=8)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return {"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": f"DualSense - {variant_name}", "price": "Indisponible", "price_numeric": None, "status": "Indisponible", "url": url}
@@ -153,7 +157,7 @@ def parse_amazon(url, group_name=""):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if "dualsense" in group_name.lower() and "B08H99BPJN" in url:
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(fetch_amazon_asin_variant, asin, color_name, group_name, timestamp) 
                        for asin, color_name in FALLBACK_AMAZON_DUALSENSE.items()]
             for fut in futures:
@@ -162,9 +166,9 @@ def parse_amazon(url, group_name=""):
 
     try:
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", timeout=10)
+            resp = cffi_requests.get(url, impersonate="chrome124", cookies=AMAZON_COOKIES, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, timeout=10)
+            resp = requests.get(url, headers=HEADERS, cookies=AMAZON_COOKIES, timeout=10)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return [{"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "Bloqué/Erreur", "url": url}]
