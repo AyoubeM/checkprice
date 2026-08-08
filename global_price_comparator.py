@@ -75,10 +75,13 @@ FALLBACK_AMAZON_DUALSENSE = {
 def extract_amazon_page_info(html):
     soup = BeautifulSoup(html, 'html.parser')
     
-    title_el = soup.find('span', {'id': 'productTitle'}) or soup.find('h1', {'id': 'title'}) or soup.find('h1')
+    # Restreindre STRICTEMENT au conteneur principal du produit (Buybox)
+    ppd = soup.find('div', id='ppd') or soup.find('div', id='centerCol') or soup.find('div', id='buybox') or soup
+
+    title_el = ppd.find('span', {'id': 'productTitle'}) or soup.find('span', {'id': 'productTitle'}) or soup.find('h1')
     title = title_el.get_text(strip=True) if title_el else ""
 
-    avail_el = soup.find('div', id='availability') or soup.find('div', id='availability_feature_div')
+    avail_el = ppd.find('div', id='availability') or ppd.find('div', id='availability_feature_div') or soup.find('div', id='availability')
     avail_text = avail_el.get_text(strip=True).lower() if avail_el else ""
     
     price_selectors = [
@@ -94,7 +97,7 @@ def extract_amazon_page_info(html):
     
     price = None
     for sel in price_selectors:
-        elements = soup.select(sel)
+        elements = ppd.select(sel)
         for el in elements:
             txt = el.get_text(strip=True)
             if '€' in txt or '$' in txt:
@@ -103,17 +106,31 @@ def extract_amazon_page_info(html):
         if price:
             break
 
+    if not price:
+        for sel in price_selectors:
+            elements = soup.select(sel)
+            for el in elements:
+                txt = el.get_text(strip=True)
+                if '€' in txt or '$' in txt:
+                    price = txt
+                    break
+            if price:
+                break
+
     full_text = soup.get_text().lower()
     is_preorder = "précommandez" in full_text or "paraîtra le" in full_text or "pre-order" in full_text or "précommander" in full_text
-    is_unavailable = "actuellement indisponible" in avail_text or "non disponible" in avail_text
+    is_unavailable = "actuellement indisponible" in avail_text or "non disponible" in avail_text or "épuisé" in avail_text
 
-    if price:
+    price_val = extract_numeric_price(price) if price else None
+    # Ignorer les vendeurs tiers hors de prix (>85 €) pour les manettes DualSense standard
+    if price_val and price_val > 85.0 and "dualsense" in (title.lower() or "dualsense") and "edge" not in title.lower():
+        is_unavailable = True
+
+    if price and not is_unavailable:
         if is_preorder:
             status = "Précommande"
-        elif not is_unavailable:
-            status = "En stock"
         else:
-            status = "Rupture"
+            status = "En stock"
     else:
         if is_preorder:
             status = "Précommande"
