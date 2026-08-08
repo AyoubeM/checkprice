@@ -75,13 +75,11 @@ FALLBACK_AMAZON_DUALSENSE = {
 def extract_amazon_page_info(html):
     soup = BeautifulSoup(html, 'html.parser')
     
-    ppd = soup.find('div', id='ppd') or soup.find('div', id='centerCol') or soup
-
-    title_el = soup.find('span', {'id': 'productTitle'}) or soup.find('h1')
+    title_el = soup.find('span', {'id': 'productTitle'}) or soup.find('h1', {'id': 'title'}) or soup.find('h1')
     title = title_el.get_text(strip=True) if title_el else ""
 
-    avail_div = ppd.find('div', id='availability')
-    avail_text = avail_div.get_text(strip=True).lower() if avail_div else ""
+    avail_el = soup.find('div', id='availability') or soup.find('div', id='availability_feature_div')
+    avail_text = avail_el.get_text(strip=True).lower() if avail_el else ""
     
     price_selectors = [
         '#corePrice_feature_div .a-price .a-offscreen',
@@ -90,25 +88,23 @@ def extract_amazon_page_info(html):
         '#apex_mobile .a-price .a-offscreen',
         '#priceInsideBuybox_feature_div .a-price .a-offscreen',
         '.priceToPay .a-offscreen',
+        'span.a-price .a-offscreen',
         '#price_inside_buybox'
     ]
     
     price = None
     for sel in price_selectors:
-        el = ppd.select_one(sel)
-        if el and '€' in el.get_text(strip=True):
-            price = el.get_text(strip=True)
+        elements = soup.select(sel)
+        for el in elements:
+            txt = el.get_text(strip=True)
+            if '€' in txt or '$' in txt:
+                price = txt
+                break
+        if price:
             break
 
-    if not price:
-        for sel in price_selectors:
-            el = soup.select_one(sel)
-            if el and '€' in el.get_text(strip=True):
-                price = el.get_text(strip=True)
-                break
-
     full_text = soup.get_text().lower()
-    is_preorder = "précommandez" in full_text or "paraîtra le" in full_text or "pre-order" in full_text
+    is_preorder = "précommandez" in full_text or "paraîtra le" in full_text or "pre-order" in full_text or "précommander" in full_text
     is_unavailable = "actuellement indisponible" in avail_text or "non disponible" in avail_text
 
     if price:
@@ -138,8 +134,10 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
     
     try:
         cookies = get_amazon_session_cookies()
-        # Envoi direct en Mobile User-Agent : Amazon renvoie 200 OK sans aucun captcha Robot Check sur les IP cloud !
-        resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
+        if HAS_CFFI:
+            resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
+        else:
+            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return {"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": f"DualSense - {variant_name}", "price": "Indisponible", "price_numeric": None, "status": "Indisponible", "url": url}
@@ -175,7 +173,10 @@ def parse_amazon(url, group_name=""):
 
     try:
         cookies = get_amazon_session_cookies()
-        resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
+        if HAS_CFFI:
+            resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
+        else:
+            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return [{"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "Bloqué/Erreur", "url": url}]
