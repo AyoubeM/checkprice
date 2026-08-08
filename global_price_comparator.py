@@ -6,7 +6,7 @@ import sys
 import os
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 
@@ -35,6 +35,16 @@ HEADERS = {
     'Sec-Fetch-User': '?1',
     'Upgrade-Insecure-Requests': '1'
 }
+
+MOBILE_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1',
+    'Accept-Language': 'fr-FR,fr;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+}
+
+def get_france_now():
+    """ Force l'horodatage en heure de Paris (UTC+2) peu importe le serveur d'exécution """
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=2)))
 
 def get_amazon_session_cookies():
     session_id = f"{random.randint(100,999)}-{random.randint(1000000,9999999)}-{random.randint(1000000,9999999)}"
@@ -73,22 +83,21 @@ FALLBACK_AMAZON_DUALSENSE = {
 def extract_amazon_page_info(html):
     soup = BeautifulSoup(html, 'html.parser')
     
-    # Restreindre strictement le scraping au conteneur produit principal (#ppd)
-    ppd = soup.find('div', id='ppd')
-    if not ppd:
-        ppd = soup.find('div', id='centerCol') or soup
+    # Conteneur principal (#ppd ou mobile #apex_mobile / #buybox)
+    ppd = soup.find('div', id='ppd') or soup.find('div', id='centerCol') or soup
 
-    title_el = soup.find('span', {'id': 'productTitle'})
+    title_el = soup.find('span', {'id': 'productTitle'}) or soup.find('h1')
     title = title_el.get_text(strip=True) if title_el else ""
 
     avail_div = ppd.find('div', id='availability')
     avail_text = avail_div.get_text(strip=True).lower() if avail_div else ""
     
-    # Recherche stricte du prix DANS LE CONTENEUR PRINCIPAL uniquement
     price_selectors = [
         '#corePrice_feature_div .a-price .a-offscreen',
         '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
         '#apex_desktop .a-price .a-offscreen',
+        '#apex_mobile .a-price .a-offscreen',
+        '#priceInsideBuybox_feature_div .a-price .a-offscreen',
         '.priceToPay .a-offscreen',
         '#price_inside_buybox'
     ]
@@ -100,8 +109,15 @@ def extract_amazon_page_info(html):
             price = el.get_text(strip=True)
             break
 
-    ppd_text = ppd.get_text().lower()
-    is_preorder = "précommandez" in ppd_text or "paraîtra le" in ppd_text or "pre-order" in ppd_text
+    if not price:
+        for sel in price_selectors:
+            el = soup.select_one(sel)
+            if el and '€' in el.get_text(strip=True):
+                price = el.get_text(strip=True)
+                break
+
+    full_text = soup.get_text().lower()
+    is_preorder = "précommandez" in full_text or "paraîtra le" in full_text or "pre-order" in full_text
     is_unavailable = "actuellement indisponible" in avail_text or "non disponible" in avail_text
 
     if price:
@@ -134,7 +150,7 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
         if HAS_CFFI:
             resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, cookies=cookies, timeout=8)
+            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return {"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": f"DualSense - {variant_name}", "price": "Indisponible", "price_numeric": None, "status": "Indisponible", "url": url}
@@ -158,7 +174,7 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
 
 def parse_amazon(url, group_name=""):
     results = []
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
 
     if "dualsense" in group_name.lower() and "B08H99BPJN" in url:
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -173,7 +189,7 @@ def parse_amazon(url, group_name=""):
         if HAS_CFFI:
             resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, cookies=cookies, timeout=10)
+            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return [{"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "Bloqué/Erreur", "url": url}]
@@ -201,7 +217,7 @@ def parse_amazon(url, group_name=""):
 
 
 def parse_leclerc(url, group_name=""):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code != 200:
@@ -249,7 +265,7 @@ def parse_leclerc(url, group_name=""):
 
 
 def parse_fnac(url, group_name=""):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
     title = "Manette PS5 DualSense Blanc" if "DualSense" in group_name else group_name
     price = "74,99 €"
     price_val = 74.99
@@ -268,7 +284,7 @@ def parse_fnac(url, group_name=""):
 
 
 def parse_instant_gaming(url, group_name=""):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code != 200:
@@ -321,7 +337,7 @@ def parse_instant_gaming(url, group_name=""):
 
 
 def parse_auchan(url, group_name=""):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code != 200:
@@ -377,12 +393,12 @@ def parse_auchan(url, group_name=""):
 
 
 def parse_carrefour(url, group_name=""):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         if HAS_CFFI:
             resp = cffi_requests.get(url, impersonate="safari17_0", headers={"Referer": "https://www.google.fr/"}, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, timeout=8)
+            resp = requests.get(url, headers=MOBILE_HEADERS, timeout=8)
 
         if resp.status_code != 200:
             return [{"timestamp": timestamp, "merchant": "Carrefour", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP " + str(resp.status_code), "url": url}]
@@ -458,7 +474,7 @@ def parse_generic_url(url, group_name=""):
     elif "carrefour" in domain:
         return parse_carrefour(url, group_name)
     else:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
         return [{
             "timestamp": timestamp,
             "merchant": domain.replace("www.", ""),
@@ -486,7 +502,7 @@ def send_discord_report(new_scan):
         grouped[g].append(r)
 
     embeds = []
-    now_str = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
+    now_str = get_france_now().strftime("%d/%m/%Y à %H:%M:%S")
 
     for g_name, items in grouped.items():
         description_lines = []
@@ -561,7 +577,7 @@ def run_global_comparator(config_path=None, report_path=None):
             history = []
 
     print("\n" + "="*95)
-    print(f" 🌍 COMPARATEUR & SUIVI HISTORIQUE DES PRIX ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')})")
+    print(f" 🌍 COMPARATEUR & SUIVI HISTORIQUE DES PRIX ({get_france_now().strftime('%d/%m/%Y %H:%M:%S')})")
     print("="*95 + "\n")
 
     new_scan = []
@@ -611,7 +627,7 @@ def start_hourly_loop():
     while True:
         run_global_comparator()
         
-        now = datetime.now()
+        now = get_france_now()
         next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
         seconds_until_next_hour = (next_hour - now).total_seconds()
         
