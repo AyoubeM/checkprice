@@ -16,6 +16,12 @@ try:
 except ImportError:
     HAS_CFFI = False
 
+try:
+    from playwright.sync_api import sync_playwright
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+
 # UTF-8 Console Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
@@ -46,6 +52,25 @@ def get_amazon_session_cookies():
         'i18n-prefs': 'EUR',
         'sp-cdn': '"L5Z9"'
     }
+
+def fetch_page_html_playwright(url):
+    if not HAS_PLAYWRIGHT:
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/124.0.0.0 Safari/537.36',
+                extra_http_headers={'Accept-Language': 'fr-FR,fr;q=0.9'}
+            )
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            time.sleep(1.5)
+            html = page.content()
+            browser.close()
+            return html
+    except Exception as e:
+        print(f"Playwright fetch exception pour {url}: {e}")
+        return None
 
 FALLBACK_AMAZON_DUALSENSE = {
     "B08H99BPJN": "Bicolore (Blanc/Noir)",
@@ -139,15 +164,25 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
     
     try:
         cookies = get_amazon_session_cookies()
+        html = None
+
         if HAS_CFFI:
             resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
-        else:
-            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
+            if resp.status_code == 200 and "Robot Check" not in resp.text:
+                html = resp.text
 
-        if resp.status_code != 200 or "Robot Check" in resp.text:
+        if not html:
+            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
+            if resp.status_code == 200 and "Robot Check" not in resp.text:
+                html = resp.text
+
+        if not html and HAS_PLAYWRIGHT:
+            html = fetch_page_html_playwright(url)
+
+        if not html:
             return {"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": f"DualSense - {variant_name}", "price": "Indisponible", "price_numeric": None, "status": "Indisponible", "url": url}
 
-        _, price, status = extract_amazon_page_info(resp.text)
+        _, price, status = extract_amazon_page_info(html)
         price_val = extract_numeric_price(price) if price and price != "Indisponible" else None
 
         return {
@@ -178,15 +213,25 @@ def parse_amazon(url, group_name=""):
 
     try:
         cookies = get_amazon_session_cookies()
+        html = None
+
         if HAS_CFFI:
             resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
-        else:
-            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
+            if resp.status_code == 200 and "Robot Check" not in resp.text:
+                html = resp.text
 
-        if resp.status_code != 200 or "Robot Check" in resp.text:
+        if not html:
+            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
+            if resp.status_code == 200 and "Robot Check" not in resp.text:
+                html = resp.text
+
+        if not html and HAS_PLAYWRIGHT:
+            html = fetch_page_html_playwright(url)
+
+        if not html:
             return [{"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "Bloqué/Erreur", "url": url}]
 
-        title, price, status = extract_amazon_page_info(resp.text)
+        title, price, status = extract_amazon_page_info(html)
         if not title:
             title = group_name
 
@@ -386,17 +431,25 @@ def parse_auchan(url, group_name=""):
 
 def parse_carrefour(url, group_name=""):
     timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
+    html = None
     try:
-        # Carrefour exige safari17_0 impersonation pour éviter l'erreur HTTP 403 sur IP Cloud/Vercel/GitHub
         if HAS_CFFI:
             resp = cffi_requests.get(url, impersonate="safari17_0", headers={"Referer": "https://www.google.fr/"}, timeout=10)
-        else:
+            if resp.status_code == 200:
+                html = resp.text
+
+        if not html:
             resp = requests.get(url, headers=MOBILE_HEADERS, timeout=8)
+            if resp.status_code == 200:
+                html = resp.text
 
-        if resp.status_code != 200:
-            return [{"timestamp": timestamp, "merchant": "Carrefour", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP " + str(resp.status_code), "url": url}]
+        if not html and HAS_PLAYWRIGHT:
+            html = fetch_page_html_playwright(url)
 
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        if not html:
+            return [{"timestamp": timestamp, "merchant": "Carrefour", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP Erreur", "url": url}]
+
+        soup = BeautifulSoup(html, 'html.parser')
         title_el = soup.find('h1')
         title = title_el.get_text(strip=True) if title_el else group_name
 
