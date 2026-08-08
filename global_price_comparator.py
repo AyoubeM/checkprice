@@ -91,7 +91,6 @@ def extract_amazon_page_info(html):
         '#apex_mobile .a-price .a-offscreen',
         '#priceInsideBuybox_feature_div .a-price .a-offscreen',
         '.priceToPay .a-offscreen',
-        'span.a-price .a-offscreen',
         '#price_inside_buybox'
     ]
     
@@ -105,17 +104,6 @@ def extract_amazon_page_info(html):
                 break
         if price:
             break
-
-    if not price:
-        for sel in price_selectors:
-            elements = soup.select(sel)
-            for el in elements:
-                txt = el.get_text(strip=True)
-                if '€' in txt or '$' in txt:
-                    price = txt
-                    break
-            if price:
-                break
 
     full_text = soup.get_text().lower()
     is_preorder = "précommandez" in full_text or "paraîtra le" in full_text or "pre-order" in full_text or "précommander" in full_text
