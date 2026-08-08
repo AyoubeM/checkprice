@@ -135,12 +135,12 @@ def extract_amazon_page_info(html):
 
 def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
     url = f"https://www.amazon.fr/dp/{asin}"
-    time.sleep(random.uniform(0.1, 0.3))
+    # Pause humaine pour ne pas déclencher le rate limiter Amazon Cloud
+    time.sleep(random.uniform(0.3, 0.7))
     
     try:
         cookies = get_amazon_session_cookies()
         if HAS_CFFI:
-            # Ne PAS passer de headers=HEADERS contradictoires avec impersonate="chrome124"
             resp = cffi_requests.get(url, impersonate="chrome124", cookies=cookies, timeout=10)
         else:
             resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
@@ -170,7 +170,8 @@ def parse_amazon(url, group_name=""):
     timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
 
     if "dualsense" in group_name.lower() and "B08H99BPJN" in url:
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # Réduction à 2 workers pour étaler les requêtes et éviter le blocage WAF Amazon Cloud
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(fetch_amazon_asin_variant, asin, color_name, group_name, timestamp) 
                        for asin, color_name in FALLBACK_AMAZON_DUALSENSE.items()]
             for fut in futures:
