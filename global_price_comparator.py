@@ -36,11 +36,14 @@ HEADERS = {
     'Upgrade-Insecure-Requests': '1'
 }
 
-AMAZON_COOKIES = {
-    'lc-acbfr': 'fr_FR',
-    'i18n-prefs': 'EUR',
-    'sp-cdn': '"L5Z9"'
-}
+def get_amazon_session_cookies():
+    session_id = f"{random.randint(100,999)}-{random.randint(1000000,9999999)}-{random.randint(1000000,9999999)}"
+    return {
+        'session-id': session_id,
+        'lc-acbfr': 'fr_FR',
+        'i18n-prefs': 'EUR',
+        'sp-cdn': '"L5Z9"'
+    }
 
 FALLBACK_AMAZON_DUALSENSE = {
     "B08H99BPJN": "Bicolore (Blanc/Noir)",
@@ -127,10 +130,11 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
     time.sleep(random.uniform(0.1, 0.4))
     
     try:
+        cookies = get_amazon_session_cookies()
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", cookies=AMAZON_COOKIES, timeout=10)
+            resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, cookies=AMAZON_COOKIES, timeout=8)
+            resp = requests.get(url, headers=HEADERS, cookies=cookies, timeout=8)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return {"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": f"DualSense - {variant_name}", "price": "Indisponible", "price_numeric": None, "status": "Indisponible", "url": url}
@@ -165,10 +169,11 @@ def parse_amazon(url, group_name=""):
         return results
 
     try:
+        cookies = get_amazon_session_cookies()
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", cookies=AMAZON_COOKIES, timeout=10)
+            resp = cffi_requests.get(url, impersonate="chrome124", headers=HEADERS, cookies=cookies, timeout=10)
         else:
-            resp = requests.get(url, headers=HEADERS, cookies=AMAZON_COOKIES, timeout=10)
+            resp = requests.get(url, headers=HEADERS, cookies=cookies, timeout=10)
 
         if resp.status_code != 200 or "Robot Check" in resp.text:
             return [{"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "Bloqué/Erreur", "url": url}]
