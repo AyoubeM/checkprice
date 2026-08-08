@@ -26,6 +26,13 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
     'Upgrade-Insecure-Requests': '1'
 }
 
@@ -56,21 +63,25 @@ FALLBACK_AMAZON_DUALSENSE = {
 
 def extract_amazon_page_info(html):
     soup = BeautifulSoup(html, 'html.parser')
-    ppd = soup.find('div', id='ppd') or soup
     
+    # Restreindre strictement le scraping au conteneur produit principal (#ppd)
+    ppd = soup.find('div', id='ppd')
+    if not ppd:
+        ppd = soup.find('div', id='centerCol') or soup
+
     title_el = soup.find('span', {'id': 'productTitle'})
     title = title_el.get_text(strip=True) if title_el else ""
 
     avail_div = ppd.find('div', id='availability')
     avail_text = avail_div.get_text(strip=True).lower() if avail_div else ""
     
+    # Recherche stricte du prix DANS LE CONTENEUR PRINCIPAL uniquement
     price_selectors = [
         '#corePrice_feature_div .a-price .a-offscreen',
         '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
         '#apex_desktop .a-price .a-offscreen',
         '.priceToPay .a-offscreen',
-        '#price_inside_buybox',
-        'span.a-color-price'
+        '#price_inside_buybox'
     ]
     
     price = None
@@ -80,10 +91,7 @@ def extract_amazon_page_info(html):
             price = el.get_text(strip=True)
             break
 
-    if not price:
-        m = re.search(r'<span class="a-offscreen">(\d+[\s,.]\d{2}\s*€)</span>', html)
-        if m:
-            price = m.group(1)
+    # Pas de fallback regex hors du ppd pour éviter les faux prix d'accessoires sponsorisés
 
     ppd_text = ppd.get_text().lower()
     is_preorder = "précommandez" in ppd_text or "paraîtra le" in ppd_text or "pre-order" in ppd_text
@@ -362,7 +370,11 @@ def parse_auchan(url, group_name=""):
 def parse_carrefour(url, group_name=""):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=8)
+        if HAS_CFFI:
+            resp = cffi_requests.get(url, impersonate="safari17_0", headers={"Referer": "https://www.google.fr/"}, timeout=10)
+        else:
+            resp = requests.get(url, headers=HEADERS, timeout=8)
+
         if resp.status_code != 200:
             return [{"timestamp": timestamp, "merchant": "Carrefour", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP " + str(resp.status_code), "url": url}]
 
@@ -384,7 +396,7 @@ def parse_carrefour(url, group_name=""):
                             offers = item['offers']
                             if isinstance(offers, dict):
                                 p_val = offers.get('lowPrice') or offers.get('price')
-                                if p_val:
+                                if p_val and str(p_val) != "0":
                                     price = f"{p_val} €"
                                 nested_offers = offers.get('offers', [])
                                 if nested_offers and isinstance(nested_offers, list):
@@ -458,35 +470,14 @@ def send_discord_report(new_scan):
         return
 
     grouped = {}
-    ps5_alerts = []
-
     for r in new_scan:
         g = r["group"]
         if g not in grouped:
             grouped[g] = []
         grouped[g].append(r)
 
-        # Vérification alerte Manette PS5 < 50€ (peu importe le vendeur)
-        p_num = r.get("price_numeric")
-        title_lower = r.get("title", "").lower()
-        group_lower = g.lower()
-        is_ps5_controller = "dualsense" in group_lower or "manette" in group_lower or "dualsense" in title_lower
-
-        if is_ps5_controller and p_num is not None and p_num < 50.0 and r.get("status") in ["En stock", "Précommande"]:
-            ps5_alerts.append(f"• **[{r['merchant']}]** [{r['title']}]({r['url']}) : **{r['price']}** ({r['status']})")
-
     embeds = []
     now_str = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
-
-    # Embed d'en-tête de statut du Bot
-    embeds.append({
-        "title": "🟢 BOT ACTIF & FONCTIONNEL",
-        "description": f"✅ **Le bot de suivi des prix est en ligne et fonctionnel !**\n📊 **{len(new_scan)}** offres analysées lors de ce relevé.",
-        "color": 5763719, # Vert néon Discord
-        "footer": {
-            "text": f"Relevé automatique du {now_str}"
-        }
-    })
 
     for g_name, items in grouped.items():
         description_lines = []
@@ -523,11 +514,6 @@ def send_discord_report(new_scan):
         payload = {
             "embeds": chunk
         }
-
-        if ps5_alerts and i == 0:
-            alerts_text = "\n".join(ps5_alerts)
-            payload["content"] = f"🚨 <@825674203029962753> **ALERTE PRIX : Manette PS5 disponible sous les 50 € !**\n{alerts_text}"
-
         try:
             resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
             if resp.status_code in [200, 204]:
@@ -612,12 +598,10 @@ def run_global_comparator(config_path=None, report_path=None):
     print(f" 📈 Historique global total : {len(history)} entrées enregistrées dans '{report_path}'.")
 
 def start_hourly_loop():
-    """ Boucle d'exécution locale chaque heure pile (ex: 18h00, 19h00, 20h00) """
     print("\n⏳ Démarrage du mode boucle locale toutes les heures pile (ex: 18h00, 19h00, 20h00)...")
     while True:
         run_global_comparator()
         
-        # Calcul des secondes restantes jusqu'à la prochaine heure pile
         now = datetime.now()
         next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
         seconds_until_next_hour = (next_hour - now).total_seconds()
