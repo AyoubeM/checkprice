@@ -1,2 +1,12 @@
+[project]
+name = "scalping-comparator"
+version = "0.1.0"
+description = "Global price comparator with Discord Webhook alerts"
+dependencies = [
+    "requests",
+    "beautifulsoup4",
+    "curl_cffi"
+]
+
 [tool.vercel]
 entrypoint = "api/cron.py"
