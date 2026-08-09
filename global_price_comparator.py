@@ -29,6 +29,11 @@ HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
 }
 
+AMAZON_HEADERS = {
+    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+}
+
 MOBILE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1',
     'Accept-Language': 'fr-FR,fr;q=0.9',
@@ -156,7 +161,7 @@ def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
         html = None
 
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", cookies=cookies, timeout=10)
+            resp = cffi_requests.get(url, impersonate="chrome124", headers=AMAZON_HEADERS, cookies=cookies, timeout=10)
             if resp.status_code == 200 and "Robot Check" not in resp.text:
                 html = resp.text
 
@@ -205,7 +210,7 @@ def parse_amazon(url, group_name=""):
         html = None
 
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", cookies=cookies, timeout=10)
+            resp = cffi_requests.get(url, impersonate="chrome124", headers=AMAZON_HEADERS, cookies=cookies, timeout=10)
             if resp.status_code == 200 and "Robot Check" not in resp.text:
                 html = resp.text
 
