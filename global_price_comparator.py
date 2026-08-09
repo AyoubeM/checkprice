@@ -22,6 +22,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1535317144089272370/iXtOlbnuezRG-SYZk5adEgqVkUrCfcsh153E7kqWZp4Vk-_F69A7BVfyfQq8ih0n2B6O"
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "17312b614244f65e8b4b1e89d3302f70")
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -53,17 +54,17 @@ def get_amazon_session_cookies():
         'sp-cdn': '"L5Z9"'
     }
 
-def fetch_page_html_playwright(url):
-    """ Exécute Playwright dans un sous-processus autonome (thread-safe pour ThreadPoolExecutor) """
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fetch_playwright.py")
-    if not os.path.exists(script_path):
+def fetch_with_scraper_api(url):
+    """ Proxy résidentiel haut de gamme ScraperAPI (Contourne 100% des WAF, Cloudflare et Datacenter IP Blacklists) """
+    if not SCRAPER_API_KEY:
         return None
     try:
-        res = subprocess.run([sys.executable, script_path, url], capture_output=True, timeout=30)
-        if res.returncode == 0 and res.stdout:
-            return res.stdout.decode('utf-8', errors='ignore')
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={url}&country_code=fr"
+        resp = requests.get(proxy_url, timeout=25)
+        if resp.status_code == 200 and "Robot Check" not in resp.text:
+            return resp.text
     except Exception as e:
-        print(f"Playwright subprocess exception pour {url}: {e}")
+        print(f"ScraperAPI Exception pour {url}: {e}")
     return None
 
 FALLBACK_AMAZON_DUALSENSE = {
@@ -154,24 +155,31 @@ def extract_amazon_page_info(html):
 
 def fetch_amazon_asin_variant(asin, variant_name, group_name, timestamp):
     url = f"https://www.amazon.fr/dp/{asin}"
-    time.sleep(random.uniform(0.2, 0.5))
+    time.sleep(random.uniform(0.2, 0.4))
     
     try:
         cookies = get_amazon_session_cookies()
         html = None
 
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", headers=AMAZON_HEADERS, cookies=cookies, timeout=10)
-            if resp.status_code == 200 and "Robot Check" not in resp.text:
-                html = resp.text
+            try:
+                resp = cffi_requests.get(url, impersonate="chrome124", headers=AMAZON_HEADERS, cookies=cookies, timeout=10)
+                if resp.status_code == 200 and "Robot Check" not in resp.text:
+                    html = resp.text
+            except Exception:
+                pass
 
         if not html:
-            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
-            if resp.status_code == 200 and "Robot Check" not in resp.text:
-                html = resp.text
+            try:
+                resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=8)
+                if resp.status_code == 200 and "Robot Check" not in resp.text:
+                    html = resp.text
+            except Exception:
+                pass
 
+        # Fallback Proxy Résidentiel ScraperAPI
         if not html:
-            html = fetch_page_html_playwright(url)
+            html = fetch_with_scraper_api(url)
 
         if not html:
             return {"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": f"DualSense - {variant_name}", "price": "Indisponible", "price_numeric": None, "status": "Indisponible", "url": url}
@@ -198,7 +206,7 @@ def parse_amazon(url, group_name=""):
     timestamp = get_france_now().strftime("%Y-%m-%d %H:%M:%S")
 
     if "dualsense" in group_name.lower() and "B08H99BPJN" in url:
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(fetch_amazon_asin_variant, asin, color_name, group_name, timestamp) 
                        for asin, color_name in FALLBACK_AMAZON_DUALSENSE.items()]
             for fut in futures:
@@ -210,17 +218,24 @@ def parse_amazon(url, group_name=""):
         html = None
 
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="chrome124", headers=AMAZON_HEADERS, cookies=cookies, timeout=10)
-            if resp.status_code == 200 and "Robot Check" not in resp.text:
-                html = resp.text
+            try:
+                resp = cffi_requests.get(url, impersonate="chrome124", headers=AMAZON_HEADERS, cookies=cookies, timeout=10)
+                if resp.status_code == 200 and "Robot Check" not in resp.text:
+                    html = resp.text
+            except Exception:
+                pass
 
         if not html:
-            resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
-            if resp.status_code == 200 and "Robot Check" not in resp.text:
-                html = resp.text
+            try:
+                resp = requests.get(url, headers=MOBILE_HEADERS, cookies=cookies, timeout=10)
+                if resp.status_code == 200 and "Robot Check" not in resp.text:
+                    html = resp.text
+            except Exception:
+                pass
 
+        # Fallback Proxy Résidentiel ScraperAPI
         if not html:
-            html = fetch_page_html_playwright(url)
+            html = fetch_with_scraper_api(url)
 
         if not html:
             return [{"timestamp": timestamp, "merchant": "Amazon", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "Bloqué/Erreur", "url": url}]
@@ -252,9 +267,13 @@ def parse_leclerc(url, group_name=""):
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8)
         if resp.status_code != 200:
-            return [{"timestamp": timestamp, "merchant": "E.Leclerc", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP " + str(resp.status_code), "url": url}]
+            html = fetch_with_scraper_api(url)
+            if not html:
+                return [{"timestamp": timestamp, "merchant": "E.Leclerc", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP " + str(resp.status_code), "url": url}]
+        else:
+            html = resp.text
 
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        soup = BeautifulSoup(html, 'html.parser')
         title_el = soup.find('h1')
         title = title_el.get_text(strip=True) if title_el else group_name
 
@@ -428,17 +447,24 @@ def parse_carrefour(url, group_name=""):
     html = None
     try:
         if HAS_CFFI:
-            resp = cffi_requests.get(url, impersonate="safari17_0", headers={"Referer": "https://www.google.fr/"}, timeout=10)
-            if resp.status_code == 200:
-                html = resp.text
+            try:
+                resp = cffi_requests.get(url, impersonate="safari17_0", headers={"Referer": "https://www.google.fr/"}, timeout=10)
+                if resp.status_code == 200:
+                    html = resp.text
+            except Exception:
+                pass
 
         if not html:
-            resp = requests.get(url, headers=MOBILE_HEADERS, timeout=8)
-            if resp.status_code == 200:
-                html = resp.text
+            try:
+                resp = requests.get(url, headers=MOBILE_HEADERS, timeout=8)
+                if resp.status_code == 200:
+                    html = resp.text
+            except Exception:
+                pass
 
+        # Fallback Proxy Résidentiel ScraperAPI pour Carrefour
         if not html:
-            html = fetch_page_html_playwright(url)
+            html = fetch_with_scraper_api(url)
 
         if not html:
             return [{"timestamp": timestamp, "merchant": "Carrefour", "group": group_name, "title": group_name, "price": "Indisponible", "price_numeric": None, "status": "HTTP Erreur", "url": url}]
